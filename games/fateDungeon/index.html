@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Dungeon Fate v2.2</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#151311;color:#eee;font-family:system-ui,sans-serif}
+body{display:flex;justify-content:center}
+#game{width:min(620px,100vw);height:100dvh;padding:10px;display:flex;flex-direction:column;gap:7px}
+.top{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.stat{background:#27221e;border:1px solid #51483d;border-radius:9px;padding:5px;text-align:center}
+.label{font-size:9px;color:#a09280;letter-spacing:1px;text-transform:uppercase}.value{font-size:17px;font-weight:900}
+#msg{height:38px;text-align:center;color:#d6bd82;font-size:13px;display:flex;align-items:center;justify-content:center}
+#board{position:relative;flex:1;min-height:300px;background:#1e1a17;border:2px solid #51483d;border-radius:14px;overflow:hidden}
+.cell{position:absolute;width:10.8%;height:10.8%;display:flex;align-items:center;justify-content:center;z-index:2;cursor:pointer}
+.floor{position:absolute;inset:2px;background:#39332d;border:1px solid #51483d;border-radius:6px;transition:background .15s,border-color .15s,box-shadow .15s}
+/* known/available/current styles */
+.cell.available .floor{border-color:#c19a52;box-shadow:0 0 10px #b68b4644}
+.cell.current .floor{border:2px solid #d2ad62;box-shadow:0 0 15px #b78d45aa}
+/* Event-based coloring for known cells (apply when a cell has data-event attribute) */
+.cell[data-event="treasure"] .floor{background:linear-gradient(180deg,#5a4520,#bda85a);border-color:#c59f3c}
+.cell[data-event="rich"] .floor{background:linear-gradient(180deg,#4b2f1f,#f0d67a);border-color:#f0c84a}
+.cell[data-event="monster"] .floor{background:linear-gradient(180deg,#4a1111,#9b1a1a);border-color:#8b1515;box-shadow:0 0 12px #9b1a1a44}
+.cell[data-event="trap"] .floor{background:linear-gradient(180deg,#4a2b18,#c06a19);border-color:#b35b12;box-shadow:0 0 8px #c06a1944}
+.cell[data-event="heal"] .floor{background:linear-gradient(180deg,#123b24,#4db67b);border-color:#2fa46a;box-shadow:0 0 8px #4db67b44}
+.cell[data-event="key"] .floor{background:linear-gradient(180deg,#2b1b3b,#9b6bd1);border-color:#8c56d0;box-shadow:0 0 8px #9b6bd144}
+/* leave empty/default as the original dark floor */
+.icon{position:relative;z-index:3;font-weight:900;font-size:19px}.event{position:absolute;right:3px;bottom:1px;z-index:4;font-size:11px}
+/* trail / visited path highlight */
+.cell.trail .floor{box-shadow:inset 0 0 10px rgba(210,180,120,0.06),0 0 8px rgba(210,180,120,0.04);border-color:rgba(210,180,120,0.12)}
+.link{position:absolute;z-index:1;pointer-events:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.6));}
+.link.hor,.link.ver{border-radius:6px;display:block;background:#4b3b31}
+.link.hor{background:linear-gradient(90deg,#caa86f,#6b4e2a);}
+.link.ver{background:linear-gradient(180deg,#caa86f,#6b4e2a);}
+.link{box-shadow:inset 0 1px 0 rgba(255,255,255,0.03)}
+.link.highlight{box-shadow:0 0 18px rgba(215,170,80,0.25),inset 0 1px 0 rgba(255,255,255,0.04);border:1px solid rgba(215,170,80,0.18)}
+/* hold progress bar (visual feedback for long-press) */
+.hold{position:absolute;left:6px;right:6px;top:6px;height:5px;border-radius:3px;overflow:hidden;z-index:5;pointer-events:none;background:rgba(0,0,0,0.18)}
+.hold .bar{width:0%;height:100%;background:linear-gradient(90deg,#ffd76b,#f5a623);transition:width 600ms linear}
+#actions{display:flex;gap:5px}button{flex:1;border:1px solid #69583e;background:#76572b;color:white;border-radius:9px;padding:10px 4px;font-size:12px;font-weight:800}button:disabled{opacity:.35}
+#overlay{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center;padding:20px;z-index:10}.panel{width:min(420px,100%);background:#29231f;border:2px solid #69583e;border-radius:16px;padding:24px;text-align:center}.panel h1{margin:0 0 8px}.panel p{color:#c1b5a5;font-size:14px}.big{font-size:42px;font-weight:950;margin:12px}
+</style>
+</head>
+<body>
+<div id="game">
+<div class="top">
+<div class="stat"><div class="label">Health</div><div class="value" id="hp">❤️❤️❤️</div></div>
+<div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+<div class="stat"><div class="label">Steps</div><div class="value" id="steps">0</div></div>
+<div class="stat"><div class="label">Combo</div><div class="value" id="combo">x1.0</div></div>
+</div>
+<div id="msg">Generating dungeon...</div>
+<div id="board"></div>
+<div id="actions"><button id="search">SEARCH ROOM</button><button id="back">BACKTRACK</button><button id="new">NEW DUNGEON</button></div>
+</div>
+<div id="overlay"><div class="panel"><h1 id="endTitle"></h1><p id="endText"></p><div class="big" id="finalScore">0</div><p id="finalStats"></p><button id="again">ENTER NEW DUNGEON</button></div></div>
+<script>
+(function(){
+"use strict";
+var W=9,H=9,N=W*H,rooms=[],startId=0,exitId=0,currentId=0,history=[],searched={},hp=3,score=0,steps=0,combo=1,gameOver=false;
+function $(id){return document.getElementById(id)}function room(id){return rooms[id]}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t}return a}
+function adjacent(r){var a=[];if(r.x>0)a.push(rooms[r.id-1]);if(r.x<W-1)a.push(rooms[r.id+1]);if(r.y>0)a.push(rooms[r.id-W]);if(r.y<H-1)a.push(rooms[r.id+W]);return a}
+function generateDungeon(){
+ rooms=[];for(var i=0;i<N;i++)rooms.push({id:i,x:i%W,y:Math.floor(i/W),links:[],known:false,visited:false,searched:false,event:"empty"});
+ var root=Math.floor(Math.random()*N),seen={},stack=[room(root)];seen[root]=true;
+ while(stack.length){var r=stack[stack.length-1],opts=adjacent(r).filter(function(n){return !seen[n.id]});if(!opts.length){stack.pop();continue}var b=opts[Math.floor(Math.random()*opts.length)];r.links.push(b.id);b.links.push(r.id);seen[b.id]=true;stack.push(b)}
+ var possible=[];for(i=0;i<N;i++){r=room(i);adjacent(r).forEach(function(n){if(n.id>r.id&&r.links.indexOf(n.id)<0)possible.push([r,n])})}shuffle(possible);for(i=0;i<Math.floor(N*.09)&&i<possible.length;i++){r=possible[i][0];b=possible[i][1];r.links.push(b.id);b.links.push(r.id)}
+ chooseEndpoints();placeEvents()
+}
+function chooseEndpoints(){
+ var d=[],q=[],i,r;startId=Math.floor(Math.random()*N);for(i=0;i<N;i++)d[i]=-1;d[startId]=0;q.push(startId);
+ for(i=0;i<q.length;i++){r=room(q[i]);r.links.forEach(function(id){if(d[id]<0){d[id]=d[r.id]+1;q.push(id)}})}
+ var far=[];for(i=0;i<N;i++)if(i!==startId)far.push(i);far.sort(function(a,b){return d[b]-d[a]});exitId=far[Math.floor(Math.random()*Math.min(6,far.length))]
+}
+function placeEvents(){
+ var ids=[],events=["treasure","treasure","treasure","treasure","rich","monster","monster","trap","trap","heal","key"],i;
+ for(i=0;i<N;i++)if(i!==startId&&i!==exitId)ids.push(i);shuffle(ids);for(i=0;i<events.length&&i<ids.length;i++)room(ids[i]).event=events[i]
+}
+/* Core mechanic: searching reveals connected rooms, but not their contents. */
+function revealNeighbors(id){room(id).links.forEach(function(n){room(n).known=true})}
+function newGame(){
+ hp=3;score=0;steps=0;combo=1;gameOver=false;searched={};history=[];generateDungeon();currentId=startId;room(startId).known=true;room(startId).visited=true;history.push(startId);$("overlay").style.display="none";$("msg").textContent="Search the room to reveal its exits. Choose your next risk.";update()
+}
+function moveTo(id){
+ if(gameOver||id===currentId)return;var cur=room(currentId);if(cur.links.indexOf(id)<0)return;
+ currentId=id;room(id).known=true;room(id).visited=true;history.push(id);steps++;combo=Math.max(1,combo-.05);
+ $("msg").textContent=id===exitId?"You found the exit room. Search it to escape!":"This room has "+room(id).links.length+" connections. Search it if you dare.";update()
+}
+function searchRoom(){
+ if(gameOver||searched[currentId])return;var r=room(currentId);searched[currentId]=true;r.searched=true;
+ if(currentId===exitId){score+=Math.floor(1000*combo);finish("You found the way out!");return}
+ var gain;
+ switch(r.event){
+ case"treasure":gain=180*Math.round(combo);score+=gain;combo=Math.min(5,combo+.35);$("msg").textContent="Treasure! +"+gain+" score.";break;
+ case"rich":gain=600*Math.round(combo);score+=gain;combo=Math.min(6,combo+.6);$("msg").textContent="Rare treasure! +"+gain+" score.";break;
+ case"monster":hp--;combo=1;$("msg").textContent="Ambush! You lost 1 ❤️.";break;
+ case"trap":hp--;combo=1;$("msg").textContent="Trap! You lost 1 ❤️.";break;
+ case"heal":hp=Math.min(3,hp+1);score+=100;$("msg").textContent="Shrine! +1 ❤️ and +100 score.";break;
+ case"key":score+=250;combo=Math.min(5,combo+.5);$("msg").textContent="Ancient key! +250 score.";break;
+ default:gain=Math.floor(35*combo);score+=gain;$("msg").textContent="Empty room. +"+gain+" score."
+ }
+ if(hp<=0){finish("The dungeon defeated you.");return}
+ revealNeighbors(currentId);update()
+}
+function backtrack(){if(gameOver||history.length<2)return;history.pop();currentId=history[history.length-1];steps++;score=Math.max(0,score-20);combo=Math.max(1,combo-.15);$("msg").textContent="Backtracked. Your discovered map remains.";update()}
+function addLink(a,b){
+ var e=document.createElement("div");
+ // add orientation class so CSS can style differently for horizontal vs vertical links
+ e.className = "link " + (a.y===b.y ? "hor" : "ver");
+ if(a.y===b.y){
+   e.style.left = ((Math.min(a.x,b.x)+1)/W*100)+"%";
+   e.style.top = ((a.y+.5)/H*100-.7)+"%";
+   e.style.width = (100/W)+"%";
+   e.style.height = "1.4%";
+ } else {
+   e.style.left = ((a.x+.5)/W*100-.7)+"%";
+   e.style.top = ((Math.min(a.y,b.y)+1)/H*100)+"%";
+   e.style.width = "1.4%";
+   e.style.height = (100/H)+"%";
+ }
+ // highlight links that touch the current room for better visibility
+ try{ if(a.id===currentId || b.id===currentId) e.classList.add('highlight'); }catch(err){}
+ $("board").appendChild(e)
+}
+function computeDistancesFrom(start){
+  var d=[];for(var i=0;i<N;i++)d[i]=Infinity; if(typeof start!=='number' || start<0||start>=N) return d; d[start]=0; var q=[start];
+  for(var qi=0;qi<q.length;qi++){var u=q[qi];var ru=room(u); if(!ru||!ru.known) continue; for(var k=0;k<ru.links.length;k++){var v=ru.links[k];var rv=room(v); if(!rv||!rv.known) continue; if(d[v]===Infinity){d[v]=d[u]+1; q.push(v);} }}
+  return d;
+}
+function render(){
+  var board=$("board");board.innerHTML="";
+  // add links for known rooms (keep order)
+  for(var i=0;i<N;i++){var r=room(i);if(!r.known)continue;for(var j=0;j<r.links.length;j++){var n=room(r.links[j]);if(n.known&&n.id>r.id)addLink(r,n)}}
+  // compute distances from current room (only across known rooms)
+  var distances = computeDistancesFrom(currentId);
+  var maxDistance = 6, minBrightness = 0.55, maxBrightness = 1.08;
+  for(i=0;i<N;i++){r=room(i);if(!r.known)continue;var e=document.createElement("div");e.className="cell"+(r.id===currentId?" current":"")+(r.id!==currentId&&room(currentId).links.indexOf(r.id)>=0?" available":"");e.style.left=(r.x/W*100)+"%";e.style.top=(r.y/H*100)+"%";
+    // only expose event color after the room has been searched
+    if(r.searched) e.setAttribute('data-event', r.event); else e.removeAttribute && e.removeAttribute('data-event');
+    var f=document.createElement("div");f.className="floor";e.appendChild(f);
+    // apply distance-based brightness shading
+    var dist = distances[r.id];
+    var brightness = minBrightness;
+    if(dist!==Infinity){ var dcl = Math.min(dist, maxDistance); var t = dcl / maxDistance; brightness = maxBrightness - t*(maxBrightness - minBrightness); }
+    f.style.transition = 'filter .22s linear'; f.style.filter = 'brightness('+brightness+')';
+    // icon and event emoji
+    var ic=document.createElement("div");ic.className="icon";ic.textContent=r.id===currentId?"◆":r.searched?"·":"?";e.appendChild(ic);
+    if(r.searched&&r.event!=="empty"){var ev=document.createElement("div");ev.className="event";ev.textContent={treasure:"🪙",rich:"💎",monster:"👹",trap:"⚠️",heal:"✚",key:"🗝"}[r.event]||"";e.appendChild(ev)}
+    // mark trail/visited rooms so the path stands out
+    if(history.indexOf(r.id)>=0) e.classList.add('trail');
+    // Determine if hold-to-search is available for this cell: only for the current, unsearched cell
+    var holdAvailable = (r.id===currentId && !r.searched);
+    var holdBar = null;
+    if(holdAvailable){
+      // add hold-progress bar container (visual feedback during long press)
+      var holdWrap=document.createElement('div');holdWrap.className='hold';holdBar=document.createElement('div');holdBar.className='bar';holdWrap.appendChild(holdBar);e.appendChild(holdWrap);
+    }
+    (function(id,cell,bar){
+      // If bar is present, armDelay controls when the visible progress starts so quick taps don't trigger the bar
+      var armDelay=160,armTimer=null,holdTimer=null,held=false,holdMs=600;
+      function startHoldAnimation(){ if(!bar) return; bar.style.transition='width '+holdMs+'ms linear'; bar.style.width='100%'; }
+      function cancelHoldAnimation(){ if(!bar) return; bar.style.transition='width 150ms linear'; bar.style.width='0%'; }
+      cell.addEventListener('pointerdown',function(ev){
+        if(gameOver) return;
+        try{ cell.setPointerCapture && cell.setPointerCapture(ev.pointerId); }catch(err){}
+        held=false;
+        // Only arm the hold progress for the current unsearched cell (bar exists)
+        if(bar){
+          // reset bar immediately but don't start visible animation until armDelay passes
+          bar.style.transition='none'; bar.style.width='0%';
+          /* force layout */ void bar.offsetWidth;
+          armTimer = setTimeout(function(){
+            // start visible fill animation over holdMs milliseconds
+            startHoldAnimation();
+            // set the hold completion timer (fires when bar reaches full width)
+            holdTimer = setTimeout(function(){
+              held = true;
+              // confirm it's still the current cell and unsearched at completion time
+              if(id===currentId && !searched[id]){
+                searchRoom();
+              }
+              // ensure bar is full
+              if(bar) bar.style.width='100%';
+            }, holdMs);
+          }, armDelay);
+        }
+      });
+      cell.addEventListener('pointerup',function(ev){
+        // clear both timers
+        if(armTimer){clearTimeout(armTimer);armTimer=null;}
+        if(holdTimer){clearTimeout(holdTimer);holdTimer=null;}
+        try{ cell.releasePointerCapture && cell.releasePointerCapture(ev.pointerId); }catch(err){}
+        if(!held){
+          // short tap: move to the cell (unless it's already current)
+          if(id!==currentId) moveTo(id);
+        }
+        // cancel/reset progress bar when finger/mouse lifts (unless it completed)
+        if(!held) cancelHoldAnimation();
+      });
+      cell.addEventListener('pointercancel',function(ev){ if(armTimer){clearTimeout(armTimer);armTimer=null;} if(holdTimer){clearTimeout(holdTimer);holdTimer=null;} try{ cell.releasePointerCapture && cell.releasePointerCapture(ev.pointerId); }catch(err){} cancelHoldAnimation(); });
+    })(r.id,e,holdBar);board.appendChild(e)}
+}
+
+function update(){$("hp").textContent="❤️".repeat(hp)+"🖤".repeat(3-hp);$("score").textContent=Math.floor(score).toLocaleString();$("steps").textContent=steps;$("combo").textContent="x"+combo.toFixed(1);$("search").disabled=gameOver||!!searched[currentId];$("back").disabled=gameOver||history.length<2;render()}
+function finish(title){gameOver=true;$("endTitle").textContent=title;$("endText").textContent="The dungeon was random. Your route was your decision.";$("finalScore").textContent=Math.floor(score).toLocaleString();$("finalStats").textContent=steps+" steps • "+Object.keys(searched).length+" rooms searched • "+hp+" ❤️ remaining";$("overlay").style.display="flex";update()}
+$("search").addEventListener("click",searchRoom);$("back").addEventListener("click",backtrack);$("new").addEventListener("click",newGame);$("again").addEventListener("click",newGame);newGame();
+})();
+</script></body></html>
